@@ -1,7 +1,8 @@
 """Beat-best bookkeeping for optimize tasks (2026-10-21).
 
-The beat-best grader (graders/optimize_run.py) reports opt_* flags in reward.json next to "reward"
-(1.5 when an answer strictly improves on best_known). This module turns them into
+The beat-best grader (graders/optimize_run.py) scores 1.5 when an answer strictly improves on best_known
+and writes opt_* flags to verifier/details.json; the remote agent loop adds them to the trial's rewards
+dict (next to "reward", which alone is the training reward). This module turns them into
 * per-trajectory ``reward_extra_info`` (every trajectory gets the same keys, 0.0 when absent), which
   verl's validation turns into ``val-aux/<data_source>/opt_beat_best/mean@N`` etc.;
 * training metrics ``rlmath/optimize/*`` over the valid optimize trajectories of a step.

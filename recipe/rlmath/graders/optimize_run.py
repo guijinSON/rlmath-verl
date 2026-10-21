@@ -18,11 +18,12 @@ Beat-best variant (rlmath, 2026-10-21; drop-in for the stock run.py of optimize 
     Exact objectives (int / Fraction value, int best_known) must beat it outright; float objectives must
     beat it by more than max(FLOAT_ABS_TOL, FLOAT_REL_TOL * |best_known|), so a published value rounded to
     a few digits cannot be "beaten" by its own unrounded form. inst["beat_tol"] overrides the tolerance.
-  - optimize tasks also write /logs/verifier/reward.json (Harbor reads it before reward.txt):
-      reward, opt_beat_best, opt_reach_best, opt_counterexample (0/1), opt_progress (unclipped),
+  - the reward file stays a single number (reward.txt via stdout), so any trainer or eval tool sees only
+    the reward. The diagnostics go to /logs/verifier/details.json, which Harbor copies back to the trial
+    dir with the rest of /logs/verifier:
+      opt_beat_best, opt_reach_best, opt_counterexample (0/1), opt_progress (unclipped),
       opt_raw_score, opt_best_known, opt_improvement (signed, positive = better than best_known).
-    Only "reward" is the training reward; the opt_* keys are diagnostics. A trainer that SUMS every
-    Harbor reward key (the stock remote agent loop before 2026-10-21) must not use these tasks.
+    The rlmath remote agent loop (2026-10-21+) reads them from there for W&B.
   - on a beat, the submitted answer is copied to /logs/verifier/beat_answer.json for human review.
 """
 import json
@@ -204,16 +205,8 @@ def main():
     if os.path.isdir("/logs/verifier"):
         with open("/logs/verifier/details.json", "w") as f:
             json.dump(det, f)
-        if inst.get("subset") == "optimize":
-            if det.get("opt_beat_best"):
-                shutil.copyfile(sys.argv[2], "/logs/verifier/beat_answer.json")
-            out = {"reward": reward}
-            for k in ("opt_beat_best", "opt_reach_best", "opt_counterexample", "opt_progress",
-                      "opt_raw_score", "opt_best_known", "opt_improvement"):
-                out[k] = det.get(k, 0)
-            with open("/logs/verifier/reward.json.tmp", "w") as f:
-                json.dump(out, f)
-            os.replace("/logs/verifier/reward.json.tmp", "/logs/verifier/reward.json")
+        if inst.get("subset") == "optimize" and det.get("opt_beat_best"):
+            shutil.copyfile(sys.argv[2], "/logs/verifier/beat_answer.json")
     print(reward)
 
 

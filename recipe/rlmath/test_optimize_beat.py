@@ -86,7 +86,7 @@ def test_diagnostics_never_change_stock_reward(g):
     assert r == 0.0 and det["valid"] is False  # same as the stock grader (KeyError -> invalid)
 
 
-def test_main_writes_reward_json_and_witness(tmp_path, monkeypatch):
+def test_main_writes_details_and_witness(tmp_path, monkeypatch, capsys):
     vdir = tmp_path / "verifier"
     vdir.mkdir()
     tests = tmp_path / "tests"
@@ -103,10 +103,12 @@ def test_main_writes_reward_json_and_witness(tmp_path, monkeypatch):
     import run  # noqa: E402
 
     run.main()
-    rj = json.loads((vdir / "reward.json").read_text())
-    assert rj["reward"] == 1.5 and rj["opt_beat_best"] == 1 and rj["opt_counterexample"] == 0
-    assert set(rj) == {"reward", "opt_beat_best", "opt_reach_best", "opt_counterexample", "opt_progress",
-                       "opt_raw_score", "opt_best_known", "opt_improvement"}
+    assert capsys.readouterr().out.strip() == "1.5"  # stdout -> reward.txt, the only reward file
+    assert not (vdir / "reward.json").exists()
+    det = json.loads((vdir / "details.json").read_text())
+    assert det["reward"] == 1.5 and det["opt_beat_best"] == 1 and det["opt_counterexample"] == 0
+    assert {"opt_beat_best", "opt_reach_best", "opt_counterexample", "opt_progress", "opt_raw_score",
+            "opt_best_known", "opt_improvement"} <= set(det)
     assert json.loads((vdir / "beat_answer.json").read_text()) == {"v": 4}
     for m in ("run", "check"):
         sys.modules.pop(m, None)
@@ -137,12 +139,27 @@ def test_group_bins_hold_beat_rewards():
     assert sum(v for k, v in m.items() if k.startswith("rlmath/group/mean_bin_")) == pytest.approx(1.0)
 
 
-def test_harbor_reward_uses_reward_key():
+def _remote_loop_fns(*names):
     import ast
 
     src = (HERE.parent / "agentic" / "agent_loop" / "remote_agent_loop.py").read_text()
-    fn = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == "_harbor_reward")
-    ns = {}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "remote_agent_loop.py", "exec"), ns)
+    fns = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in names]
+    ns = {"Path": Path}
+    exec(compile(ast.Module(body=fns, type_ignores=[]), "remote_agent_loop.py", "exec"), ns)
+    return ns
+
+
+def test_harbor_reward_uses_reward_key():
+    ns = _remote_loop_fns("_harbor_reward")
     assert ns["_harbor_reward"]({"reward": 1.5, "opt_beat_best": 1, "opt_raw_score": 4.0}) == 1.5
     assert ns["_harbor_reward"]({"a": 0.25, "b": 0.5}) == 0.75  # legacy multi-key dicts still sum
+
+
+def test_verifier_diagnostics_reads_details(tmp_path):
+    ns = _remote_loop_fns("_verifier_diagnostics")
+    trial = types.SimpleNamespace(_trial_paths=types.SimpleNamespace(verifier_dir=tmp_path))
+    assert ns["_verifier_diagnostics"](trial) == {}  # no details.json
+    (tmp_path / "details.json").write_text(json.dumps(
+        {"valid": True, "reward": 1.5, "opt_beat_best": 1, "opt_raw_score": 4.0, "opt_note": "x", "basis_count": 4}))
+    assert ns["_verifier_diagnostics"](trial) == {"opt_beat_best": 1, "opt_raw_score": 4.0}
+    assert ns["_verifier_diagnostics"](types.SimpleNamespace()) == {}

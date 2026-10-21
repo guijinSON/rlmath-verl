@@ -7,8 +7,8 @@ dataset (cp -a src dst), never on the task dirs of a run in progress. Only files
 aav run.py (STOCK_SHA256) are replaced; anything else is reported and left alone unless --force.
 Symlinked task dirs / run.py files are always skipped (they point at shared copies).
 
-The patched tasks write reward.json with opt_* diagnostics, so train on them only with a recipe whose
-remote agent loop takes the "reward" key instead of summing all Harbor reward keys (2026-10-21+).
+The patched grader still writes a single reward (1.5 on a strict beat of best_known), so any trainer can use
+the tasks; the opt_* diagnostics in verifier/details.json reach W&B only with the 2026-10-21+ recipe.
 """
 from __future__ import annotations
 

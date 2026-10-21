@@ -64,12 +64,34 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "DEBUG"))
 def _harbor_reward(rewards: dict) -> float:
     """Trajectory reward from a Harbor rewards dict.
 
-    rlmath optimize graders (recipe/rlmath/graders/optimize_run.py) write reward.json with opt_* diagnostics
-    next to "reward"; only "reward" is the training reward. Dicts without a "reward" key keep the old
-    behaviour (sum of all values)."""
+    _run_local_trial adds the optimize grader's opt_* diagnostics next to "reward"; only "reward" is the
+    training reward. Dicts without a "reward" key keep the old behaviour (sum of all values)."""
     if "reward" in rewards:
         return float(rewards["reward"])
     return float(sum(rewards.values()))
+
+
+def _verifier_diagnostics(trial) -> dict:
+    """opt_* numbers that the rlmath optimize grader (recipe/rlmath/graders/optimize_run.py) writes to
+    /logs/verifier/details.json, read from the trial's host copy of that dir; {} when absent."""
+    import json
+    import math
+
+    try:
+        paths = getattr(trial, "_trial_paths", None)
+        if paths is None:
+            return {}
+        p = Path(paths.verifier_dir) / "details.json"
+        if not p.is_file():
+            return {}
+        det = json.loads(p.read_text())
+        return {
+            k: v
+            for k, v in det.items()
+            if k.startswith("opt_") and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        }
+    except Exception:  # noqa: BLE001 - diagnostics only
+        return {}
 
 
 def _keep_beat_witness(trial, trial_id: str, task_path: str, rewards: dict) -> None:
@@ -705,8 +727,10 @@ class RemoteAgentLoop(AgentLoopBase):
 
         if trial_result.exception_info is None:
             rewards = trial_result.verifier_result.rewards if trial_result.verifier_result is not None else {}
-            if rewards and rewards.get("opt_beat_best"):
-                _keep_beat_witness(trial, trial_id, task_path, dict(rewards))
+            if rewards and "reward" in rewards:  # optimize grader diagnostics ride along; _harbor_reward ignores them
+                rewards = {**rewards, **_verifier_diagnostics(trial)}
+                if rewards.get("opt_beat_best"):
+                    _keep_beat_witness(trial, trial_id, task_path, dict(rewards))
             return AgentRunResult(
                 run_id=trial_id,
                 status="completed",
