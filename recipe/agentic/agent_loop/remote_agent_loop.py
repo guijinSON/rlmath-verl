@@ -61,7 +61,13 @@ logger.propagate = True
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "DEBUG"))
 # Late imports to avoid hard dependency on verl at module level.
 try:
-    from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutput, DictConfigWrap, register
+    from verl.experimental.agent_loop.agent_loop import (
+        AgentLoopBase,
+        AgentLoopMetrics,
+        AgentLoopOutput,
+        DictConfigWrap,
+        register,
+    )
     from verl.workers.rollout.llm_server import LLMServerClient
 except ImportError:  # pragma: no cover
     from dataclasses import dataclass
@@ -83,6 +89,8 @@ except ImportError:  # pragma: no cover
         num_turns: int = 0
         metrics: Any = None
         extra_fields: dict = dc_field(default_factory=dict)
+
+    AgentLoopMetrics = dict  # type: ignore[misc,assignment]
 
     class LLMServerClient:  # type: ignore[no-redef]
         pass
@@ -795,6 +803,7 @@ class RemoteAgentLoop(AgentLoopBase):
                     response_logprobs=[0.0],
                     reward_score=reward_score,
                     num_turns=0,
+                    metrics=AgentLoopMetrics(),  # required field; replaced by the raw dict below
                 )
                 # rlmath 10-21: assign AFTER construction - passing the dict to the pydantic constructor coerces it
                 # into AgentLoopMetrics and silently drops harbor_status/harbor_error, so infra failures (env never
