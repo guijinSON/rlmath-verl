@@ -1,0 +1,15 @@
+# ~/.ssh/config.rlmath  (add "Include ~/.ssh/config.rlmath" to ~/.ssh/config)
+# One alias per sandbox VM; sbx-tunnel.sh <alias> exposes it as /tmp/<alias>-docker.sock.
+Host sbx5
+  HostName <vm5-public-ip>
+  Port <vm5-ssh-port>
+Host sbx7
+  HostName <vm7-public-ip>
+  Port <vm7-ssh-port>
+Host sbx*
+  User root
+  IdentityFile ~/.ssh/id_rlmath_sbx     # a key used only for the sandbox VMs
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+  ServerAliveInterval 15
+  ServerAliveCountMax 4

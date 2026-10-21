@@ -165,9 +165,9 @@ fi
 source $VENV/bin/activate
 export PATH=$W/bin:$PATH
 export CUDA_VISIBLE_DEVICES=$GPU_LIST            # MLXP: GPUs 4-7 belong to the running bigroll3 job
-# Docker traffic goes through one persistent SSH unix-socket tunnel to the VM (bin/sbx-tunnel.sh);
+# Docker traffic goes through one persistent SSH unix-socket tunnel to the VM (infra/sandbox-vm/sbx-tunnel.sh);
 # ssh:// DOCKER_HOST spawns an ssh per docker call and floods the VM's sshd at 100+ concurrent trials.
-pgrep -f sbx-tunnel.sh >/dev/null || { setsid nohup $W/bin/sbx-tunnel.sh >/dev/null 2>&1 < /dev/null & }
+# Tunnels are started beforehand, one per sandbox VM: infra/sandbox-vm/sbx-tunnel.sh <alias> (see infra/README.md).
 RLMATH_DEFAULT_SOCK=${RLMATH_DEFAULT_SOCK:-/tmp/sbx-docker.sock}   # 10-21: default sandbox socket overridable (VM5 down after vast outage)
 for i in $(seq 1 30); do [ -S $RLMATH_DEFAULT_SOCK ] && break; sleep 1; done
 export DOCKER_HOST=unix://$RLMATH_DEFAULT_SOCK

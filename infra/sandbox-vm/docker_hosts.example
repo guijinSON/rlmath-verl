@@ -1,0 +1,7 @@
+# RLMATH_DOCKER_HOSTS_FILE (recipe/rlmath/remote_docker.py): <docker host> <weight>, re-read every 20 s.
+# Each new trial goes to the host with the fewest live trials per unit weight. Weight 0 drains a host with no restart;
+# a missing socket is skipped. Launchers delete all containers on every host listed with weight > 0, so never list a
+# VM in two runs' files.
+unix:///tmp/sbx5-docker.sock  1.5   # 245 cores
+unix:///tmp/sbx7-docker.sock  1.0   # 122 cores
+unix:///tmp/sbx4-docker.sock  0.5   # 61 cores

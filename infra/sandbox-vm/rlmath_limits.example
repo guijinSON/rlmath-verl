@@ -1,0 +1,5 @@
+# RLMATH_LIMITS_FILE (recipe/rlmath/limits.py): live rollout concurrency, re-read every 30 s, no restart needed.
+max_concurrent_prompts 64   # GRPO groups in flight; clamped to verl's cap (rollout replicas x 16)
+trials_per_worker      40   # concurrent Harbor trials per AgentLoopWorker (x 8 workers = 320 trials)
+# Rule of thumb: each trial runs 2 containers (task + egress sidecar); keep total trials <= ~0.75 x sandbox cores,
+# or environment start-up times out (EnvironmentStartTimeoutError) on a CPU-saturated VM.

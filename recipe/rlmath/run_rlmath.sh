@@ -9,9 +9,9 @@ EXP=${EXP:-rlmath_q4bthink_grpo_v1}
 source $W/venv/bin/activate
 export PATH=$W/bin:$PATH
 export CUDA_VISIBLE_DEVICES=0,1,2,3            # GPUs 4-7 belong to the running bigroll3 job
-# Docker traffic goes through one persistent SSH unix-socket tunnel to the VM (bin/sbx-tunnel.sh);
+# Docker traffic goes through one persistent SSH unix-socket tunnel to the VM (infra/sandbox-vm/sbx-tunnel.sh);
 # ssh:// DOCKER_HOST spawns an ssh per docker call and floods the VM's sshd at 100+ concurrent trials.
-pgrep -f sbx-tunnel.sh >/dev/null || { setsid nohup $W/bin/sbx-tunnel.sh >/dev/null 2>&1 < /dev/null & }
+# Tunnels are started beforehand, one per sandbox VM: infra/sandbox-vm/sbx-tunnel.sh <alias> (see infra/README.md).
 for i in $(seq 1 30); do [ -S /tmp/sbx-docker.sock ] && break; sleep 1; done
 export DOCKER_HOST=unix:///tmp/sbx-docker.sock
 export DOCKER_API_VERSION=1.49                 # VM daemon (28.1.1) max API; harbor's platform probe does not negotiate
