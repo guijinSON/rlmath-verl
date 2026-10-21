@@ -788,15 +788,19 @@ class RemoteAgentLoop(AgentLoopBase):
                 reward_score = 0.0
                 if result.rewards:
                     reward_score = sum(result.rewards.values())
-                return AgentLoopOutput(
+                out = AgentLoopOutput(
                     prompt_ids=prompt_ids,
                     response_ids=[eos_token_id],
                     response_mask=[0],
                     response_logprobs=[0.0],
                     reward_score=reward_score,
                     num_turns=0,
-                    metrics=metrics,
                 )
+                # rlmath 10-21: assign AFTER construction - passing the dict to the pydantic constructor coerces it
+                # into AgentLoopMetrics and silently drops harbor_status/harbor_error, so infra failures (env never
+                # started -> no turns) were never detected/excluded.
+                out.metrics = metrics
+                return out
 
             # 6. Reconstruct verl output — token_ids/logprobs from worker cache
             initial_messages = session.turns[0].request_messages
