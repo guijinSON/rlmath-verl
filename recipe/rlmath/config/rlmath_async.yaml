@@ -1,0 +1,125 @@
+# Fully-async (streaming + partial rollout) GRPO for rlmath Harbor tasks.
+#
+# = verl@9f18abe5 verl/experimental/fully_async_policy/config/fully_async_ppo_trainer.yaml
+#   (copied inline instead of chained through a second searchpath: that dir has no
+#   __init__.py, so pkg:// resolution of it is fragile)
+# + the recipe's data.harbor_* / proxy_server / remote_agent sections
+#   (recipe/agentic/config/agentic_trainer.yaml)
+# + rlmath_async.* knobs read by recipe/rlmath/async_main.py.
+#
+# Everything run-specific (model, lengths, lr, GPUs split, wandb ...) is set on the
+# command line by run_rlmath_async.sh, exactly like run_rlmath.sh does.
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+# ---------------------------------------------------------------- fully async
+async_training:
+  # rollouter may start (1 + staleness_threshold) * required_samples prompts per
+  # weight version (fully_async_rollouter.py:531-545, 1085-1107)
+  staleness_threshold: 0.5
+  # trainer syncs weights to the rollouter after this many optimizer steps
+  trigger_parameter_sync_step: 1
+  # required_samples = ppo_mini_batch_size * require_batches (prompts per train step)
+  require_batches: 1
+  # keep in-flight turns across a weight sync (implemented for the proxy path in
+  # async_proxy.py; False = regenerate the interrupted turn from scratch)
+  partial_rollout: True
+  use_trainer_do_validate: False
+
+rollout:
+  nnodes: 1
+  n_gpus_per_node: 3
+  # unused by verl@9f18abe5 (actor_rollout_ref.rollout.n is what counts); kept for parity
+  n: 8
+  # total number of *prompts* the rollouter will feed (not steps!)
+  total_rollout_steps: 4800
+
+data:
+  gen_batch_size: 1          # asserted == 1 (fully_async_rollouter.py:417)
+  train_batch_size: 0        # asserted == 0 (fully_async_rollouter.py:416)
+  return_raw_chat: true
+  prompt_key: instance_id
+  train_harbor_dir: null
+  val_harbor_dir: null
+  harbor_cache_dir: "~/.cache/verl/agentic/harbor"
+  harbor_data_source: "harbor"
+  harbor_ability: "agent"
+  harbor_overwrite: false
+  harbor_train_limit: null
+  harbor_val_limit: null
+
+actor_rollout_ref:
+  hybrid_engine: False       # asserted (fully_async_rollouter.py:415, fully_async_trainer.py:75)
+  rollout:
+    mode: async
+    calculate_log_probs: True  # asserted (fully_async_rollouter.py:692)
+    # MUST be true: otherwise prepare_single_generation_data overwrites agent_name with
+    # "single_turn_agent" and the remote agent is never used (detach_utils.py:66-67)
+    multi_turn:
+      enable: True
+    agent:
+      default_agent_loop: rlmath_remote_agent_async
+      agent_loop_config_path: recipe/rlmath/config/async-agent.yaml
+    checkpoint_engine:
+      backend: "nccl"
+  model:
+    # flash-attn 2.8.3 built for torch 2.9+cu128 (sm_90) -> packed sequences
+    use_remove_padding: True
+
+algorithm:
+  rollout_correction:
+    # verl's fully-async default is bypass_mode=True (old_log_prob := rollout logprobs).
+    # NOT safe here: the recipe rebuilds multi-turn trajectories by re-tokenizing messages,
+    # and Qwen3-Thinking's chat template drops earlier turns' <think> blocks from the prompt
+    # the model actually saw, so rollout logprobs are conditioned on a different context than
+    # the training forward pass. Recompute old_log_prob like the sync run does (decoupled mode).
+    bypass_mode: False
+
+# ---------------------------------------------------------------- recipe sections
+proxy_server:
+  host: "0.0.0.0"
+  port: 0
+  tool_format: "qwen3_coder"
+  llm_proxy_ip: null
+  debug: false
+  session_dump_dir: null
+
+# Injected as REMOTE_AGENT_* env vars only when the shell has not set them
+# (recipe agentic_main.collect_yaml_env_overrides); run_rlmath_async.sh sets them all.
+remote_agent:
+  agent_name: null
+  agent_import_path: recipe.rlmath.rl_terminus:RLTerminus2
+  model_name: openai/policy
+  agent_kwargs: null
+  max_retries: null
+  retry_base_delay: null
+  task_path_template: null
+  environment_overrides: null
+  environment_import_path: recipe.rlmath.remote_docker:RemoteDockerEnvironment
+  environment_kwargs: {}
+  use_local_trial: true
+  proxy_server_url: null
+  harbor_server_url: null
+  harbor_timeout: null
+
+# ---------------------------------------------------------------- ours
+rlmath_async:
+  # cap on prompts (x rollout.n trials) in flight; null = verl default
+  # min(num_replicas * 16, max_required_samples). Lower it if the sandbox VM chokes.
+  max_concurrent_prompts: null
+  # max abort/resume cycles for one LLM call before returning it as-is
+  max_resumes_per_turn: 32
+  # DAPO-style overlong filtering: drop truncated trajectories (response hit max_response_length,
+  # or any LLM call hit its per-call max_tokens) from the policy loss; they stay in GRPO group stats
+  overlong_filter: true
+  # filter | penalize | off; null = filter if overlong_filter else off. penalize: truncated trajectories get
+  # reward 0 before the GRPO advantage and stay in the loss (overlong.py)
+  overlong_mode: null
+  # leave trials that failed because of the sandbox host (Docker errors, env start timeouts) out of their GRPO group
+  drop_infra_failed: true

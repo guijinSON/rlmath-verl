@@ -1,0 +1,4 @@
+# Agent-loop registry entry for the fully-async run (loaded by AgentLoopWorker from
+# actor_rollout_ref.rollout.agent.agent_loop_config_path, verl agent_loop.py:445-450).
+- name: rlmath_remote_agent_async
+  _target_: recipe.rlmath.async_agent_loop.AsyncRemoteAgentLoop
