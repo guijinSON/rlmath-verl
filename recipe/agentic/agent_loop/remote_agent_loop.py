@@ -59,6 +59,43 @@ logger.setLevel(logging.DEBUG)
 logger.propagate = True
 # Allow operator override; default to DEBUG while debugging local trial issues.
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "DEBUG"))
+
+
+def _harbor_reward(rewards: dict) -> float:
+    """Trajectory reward from a Harbor rewards dict.
+
+    rlmath optimize graders (recipe/rlmath/graders/optimize_run.py) write reward.json with opt_* diagnostics
+    next to "reward"; only "reward" is the training reward. Dicts without a "reward" key keep the old
+    behaviour (sum of all values)."""
+    if "reward" in rewards:
+        return float(rewards["reward"])
+    return float(sum(rewards.values()))
+
+
+def _keep_beat_witness(trial, trial_id: str, task_path: str, rewards: dict) -> None:
+    """Copy the verifier dir of a trial that beat best_known (opt_beat_best) to RLMATH_BEAT_DIR
+    (default: <trials_dir>/_rlmath_beats) and append a line to beats.jsonl there, for human review."""
+    import json
+    import shutil
+    import time
+
+    try:
+        paths = getattr(trial, "_trial_paths", None)
+        src = Path(paths.verifier_dir) if paths is not None else None
+        root = os.environ.get("RLMATH_BEAT_DIR") or (str(src.parent.parent / "_rlmath_beats") if src else "")
+        if not root:
+            return
+        dest = Path(root) / trial_id
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src is not None and src.is_dir():
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        line = {"time": time.time(), "trial_id": trial_id, "task": os.path.basename(str(task_path).rstrip("/")),
+                "rewards": rewards, "witness_dir": str(dest)}
+        with open(Path(root) / "beats.jsonl", "a") as f:
+            f.write(json.dumps(line) + "\n")
+        logger.warning("[local_trial:%s] BEAT best_known: %s -> %s", trial_id, rewards, dest)
+    except Exception as e:  # noqa: BLE001 - never fail a trial over bookkeeping
+        logger.warning("[local_trial:%s] could not keep beat witness: %s", trial_id, e)
 # Late imports to avoid hard dependency on verl at module level.
 try:
     from verl.experimental.agent_loop.agent_loop import (
@@ -668,6 +705,8 @@ class RemoteAgentLoop(AgentLoopBase):
 
         if trial_result.exception_info is None:
             rewards = trial_result.verifier_result.rewards if trial_result.verifier_result is not None else {}
+            if rewards and rewards.get("opt_beat_best"):
+                _keep_beat_witness(trial, trial_id, task_path, dict(rewards))
             return AgentRunResult(
                 run_id=trial_id,
                 status="completed",
@@ -772,6 +811,7 @@ class RemoteAgentLoop(AgentLoopBase):
             # Build metrics with harbor result status
             metrics: dict[str, Any] = {
                 "harbor_status": result.status,
+                "harbor_rewards": dict(result.rewards or {}),
             }
             if result.error:
                 metrics["harbor_error"] = result.error
@@ -795,7 +835,7 @@ class RemoteAgentLoop(AgentLoopBase):
                 eos_token_id = self.tokenizer.eos_token_id
                 reward_score = 0.0
                 if result.rewards:
-                    reward_score = sum(result.rewards.values())
+                    reward_score = _harbor_reward(result.rewards)
                 out = AgentLoopOutput(
                     prompt_ids=prompt_ids,
                     response_ids=[eos_token_id],
@@ -820,7 +860,7 @@ class RemoteAgentLoop(AgentLoopBase):
             output.metrics = metrics
 
             if result.rewards:
-                output.reward_score = sum(result.rewards.values())
+                output.reward_score = _harbor_reward(result.rewards)
 
             return output
 

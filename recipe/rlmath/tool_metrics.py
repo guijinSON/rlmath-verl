@@ -165,7 +165,8 @@ def group_metrics(uids, rewards, valid, kinds=None) -> dict:
         m[f"rlmath/group/mean_score_p{q}"] = means[min(ng - 1, int(q / 100 * ng))]
     edges = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
     for lo, hi in zip(edges[:-1], edges[1:], strict=True):
-        inside = sum(1 for x in means if lo <= x < hi or (hi == 1.0 and x == 1.0))
+        # the top bin also holds group means above 1.0 (optimize beat-best reward 1.5)
+        inside = sum(1 for x in means if lo <= x < hi or (hi == 1.0 and x >= 1.0))
         m[f"rlmath/group/mean_bin_{lo:.1f}-{hi:.1f}"] = inside / ng
     by_kind = defaultdict(list)
     for u, v in groups.items():

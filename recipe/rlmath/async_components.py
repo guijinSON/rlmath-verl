@@ -277,6 +277,32 @@ class _RLMathTrainer(_TrainerBase):
                 self.metrics.update(tool_metrics(ntb["tool_cmds"], ntb["tool_libs"], ntb["tool_exes"], raw, valid))
         except Exception as e:  # noqa: BLE001
             print(f"[RLMathTrainer][reward] group/tool metrics failed ({e!r})", flush=True)
+        try:  # rlmath/optimize/* from the beat-best grader's flags (recipe/rlmath/optimize_beat.py)
+            from recipe.rlmath.optimize_beat import optimize_metrics
+
+            ntb = batch.non_tensor_batch
+            if ntb.get("opt_beat_best") is not None and ntb.get("task_kind") is not None:
+                infra = getattr(self, "_rlmath_infra", None) or [False] * len(batch)
+                if not hasattr(self, "_rlmath_opt_totals"):
+                    self._rlmath_opt_totals = {}
+                om = optimize_metrics(
+                    ntb["task_kind"],
+                    ntb["opt_beat_best"],
+                    ntb["opt_reach_best"],
+                    ntb["opt_counterexample"],
+                    [not x for x in infra],
+                    self._rlmath_opt_totals,
+                )
+                self.metrics.update(om)
+                if om["rlmath/optimize/beat_best_count"] > 0:
+                    print(
+                        f"[RLMathTrainer][optimize] global_step={self.global_steps} BEAT best_known in "
+                        f"{int(om['rlmath/optimize/beat_best_count'])} trajectories "
+                        f"(cum {int(om['rlmath/optimize/beat_best_cum'])}); witnesses in RLMATH_BEAT_DIR",
+                        flush=True,
+                    )
+        except Exception as e:  # noqa: BLE001
+            print(f"[RLMathTrainer][reward] optimize metrics failed ({e!r})", flush=True)
         return batch
 
     def _fit_compute_advantage(self, batch):

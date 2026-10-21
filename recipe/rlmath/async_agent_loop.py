@@ -425,9 +425,11 @@ class AsyncRemoteAgentLoop(RemoteAgentLoop):
         wall = time.time() - t0
 
         status = error = None
+        harbor_rewards = {}
         if isinstance(output.metrics, dict):
             status = output.metrics.get("harbor_status")
             error = output.metrics.get("harbor_error")
+            harbor_rewards = output.metrics.get("harbor_rewards") or {}
         infra = is_infra_failure(status, error)
         if str(status or "").lower() == "completed":
             _last_completed_at = time.time()
@@ -466,4 +468,15 @@ class AsyncRemoteAgentLoop(RemoteAgentLoop):
         output.extra_fields["tool_libs"] = str(libs)
         output.extra_fields["tool_exes"] = str(exes)
         output.extra_fields["task_kind"] = task_kind(kwargs.get("instance_id"))
+
+        # optimize beat-best flags -> reward_extra_info (val-aux/<source>/opt_*/mean@N; rlmath/optimize/* in training).
+        # verl stacks reward_extra_info with the FIRST trajectory's keys, so every trajectory must carry them, and a
+        # None reward_score would send this one to the reward loop, which replaces reward_extra_info. Harbor always
+        # returns a reward (or an error -> 0.0), so None only happens if a verifier wrote nothing; score it 0.0.
+        from recipe.rlmath.optimize_beat import optimize_flags
+
+        if output.reward_score is None:
+            logger.warning("[rlmath-async] trial returned no reward; scoring it 0.0")
+            output.reward_score = 0.0
+        output.extra_fields["reward_extra_info"] = optimize_flags(harbor_rewards)
         return output
