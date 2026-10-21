@@ -1,3 +1,16 @@
+> **rlmath-verl** is a fork of [volcengine/verl](https://github.com/volcengine/verl) @ `9f18abe5` carrying the
+> **rlmath** recipe: fully-async agentic GRPO that trains Qwen3.5 models to solve research-math tasks in Harbor
+> sandboxes with a Terminus-2 agent.
+>
+> * [`recipe/rlmath/`](recipe/rlmath/README.md): the training recipe (design notes in `ASYNC_NOTES.md`)
+> * [`infra/`](infra/README.md): how GPU machines, CPU sandbox VMs, tunnels, Slurm jobs, checkpoints and W&B fit together
+> * [`recipe/agentic/`](recipe/README.md): vendored from alibaba/verl-recipe (remote agent loop, LLM proxy, Harbor)
+> * Changes to verl itself are small and listed in the commit history (`git log 9f18abe5..`).
+>
+> The upstream verl README follows.
+
+---
+
 <div align="center">
  👋 Hi, everyone!
     verl is a RL training library initiated by <b>ByteDance Seed team</b> and maintained by the verl community.
