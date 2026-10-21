@@ -190,6 +190,14 @@ def hf_processor(name_or_path, **kwargs):
         Returns ``None`` for text-only models (including AutoProcessor fallbacks to
         tokenizer backends such as ``TokenizersBackend``).
     """
+    import os as _os
+
+    # rlmath: RLMATH_TEXT_ONLY=1 treats a vision-language checkpoint (e.g. Qwen3.6-35B-A3B) as text-only:
+    # no multimodal processor anywhere, so datasets / agent loops take the tokenizer path that the LLM proxy
+    # also uses (keeps the TITO prompt tokens identical) and plain 1-D position ids are used.
+    if _os.environ.get("RLMATH_TEXT_ONLY") == "1":
+        return None
+
     from transformers import AutoConfig, AutoProcessor, PreTrainedTokenizerBase
 
     try:

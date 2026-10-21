@@ -301,7 +301,7 @@ class FSDPEngine(BaseEngine):
             module.to(torch_dtype)
 
             if self.model_config.enable_gradient_checkpointing:
-                module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": True})  # rlmath: MoE routing differs on recompute -> non-reentrant CheckpointError
         return module
 
     def _build_lora_module(self, module):

@@ -432,7 +432,10 @@ class MegatronEngine(BaseEngine):
             optimizer_scheduler=self.lr_scheduler,
             use_distributed_optimizer=self.engine_config.use_distributed_optimizer,
             use_checkpoint_opt_param_scheduler=self.optimizer_config.use_checkpoint_opt_param_scheduler,
-            use_dist_checkpointing=self.engine_config.use_dist_checkpointing,
+            # RLMATH_MCORE_DIST_CKPT=1 (10-19): save/resume in native Megatron dist_checkpointing (exact) while the
+            # initial weights still load from HF via mbridge; the HF-format path rounds zero-centered GDN out_norm
+            # weights (stored as w-1 internally, as w~1.0 in HF bf16) on every save/load.
+            use_dist_checkpointing=self.engine_config.use_dist_checkpointing or os.environ.get("RLMATH_MCORE_DIST_CKPT") == "1",
             bridge=self.bridge,
             provider=self.provider,
             peft_cls=self.peft_cls,
