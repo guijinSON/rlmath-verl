@@ -55,6 +55,14 @@ def init_megatron_optim_config(
     if override_config:
         for k, v in override_config.items():
             optim_args[k] = v
+    # mcore's OptimizerConfig wants torch dtypes for the precision-aware optimizer fields; Hydra overrides give strings
+    # ("bf16", "fp32", "torch.bfloat16"), e.g. MCORE_OPTIM=bf16 in recipe/rlmath/run_rlmath_async.sh
+    _dtypes = {"bf16": torch.bfloat16, "bfloat16": torch.bfloat16, "fp16": torch.float16, "float16": torch.float16,
+               "fp32": torch.float32, "float32": torch.float32}
+    for k in ("main_grads_dtype", "main_params_dtype", "exp_avg_dtype", "exp_avg_sq_dtype"):
+        v = optim_args.get(k)
+        if isinstance(v, str):
+            optim_args[k] = _dtypes[v.removeprefix("torch.")]
 
     print_rank_0(f"optimizer config after override: {optim_args}")
 
