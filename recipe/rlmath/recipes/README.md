@@ -43,7 +43,7 @@ EXP=rlmath_q35_9b_<data>_<site>_v1 TRAIN_DIR=<tasks> VAL_DIR=<val tasks> \
 | `STALENESS` | 1.0 | async staleness threshold; 2.0 is untested in isolation |
 | `BACKEND` | fsdp | `fsdp` / `megatron` (verl Megatron engine, TP=`MCORE_TP` + sequence parallel; needs the mcore venv) |
 | `FSDP_OPTIM` | torchao_bf16_sr | `torchao_bf16_sr` (bf16 params, torchao AdamW with bf16 stochastic rounding) / `torch_fp32` |
-| `MCORE_OPTIM` | fp32 | `fp32` (distributed Adam, fp32 main params + moments) / `bf16` (precision-aware TE FusedAdam: bf16 moments, fp32-exact master via remainders) |
+| `MCORE_OPTIM` | bf16 | `bf16` (precision-aware TE FusedAdam: bf16 moments, fp32-exact master via remainders; matched the fp32 run on 8 JUPITER nodes, 10-24) / `fp32` (distributed Adam, fp32 main params + moments) |
 | `MCORE_TP` | 4 | |
 | `TOTAL_STEPS`, `VAL_BEFORE` | 160, true | |
 | `LR` | per recipe file | |

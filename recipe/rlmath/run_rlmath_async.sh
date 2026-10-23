@@ -186,10 +186,11 @@ if [ "${TRAIN_BACKEND:-fsdp}" = megatron ]; then
   # validated on JUPITER (10-20/22): chunked LM head + log-probs (no full fp32 logits at 100k+ tokens) and per-rank
   # dist-ckpt loading (the fully-parallel broadcast load hung on 8 nodes)
   export RLMATH_LOGITS_CHUNK=${RLMATH_LOGITS_CHUNK:-8192} RLMATH_MCORE_PLAIN_LOAD=${RLMATH_MCORE_PLAIN_LOAD:-1}
-  # MCORE_OPTIM: fp32 = mcore distributed Adam with fp32 main params + fp32 moments (default);
-  # bf16 = precision-aware optimizer (TE FusedAdam): bf16 Adam moments, master params still fp32-exact via bf16
-  # params + 16-bit remainders (store_param_remainders). mcore has no bf16 stochastic-rounding optimizer like FSDP's.
-  case "${MCORE_OPTIM:=fp32}" in
+  # MCORE_OPTIM: bf16 = precision-aware optimizer (TE FusedAdam): bf16 Adam moments, master params still fp32-exact
+  # via bf16 params + 16-bit remainders (store_param_remainders) (default since 10-24: the 8-node JUPITER bf16 run
+  # tracked the fp32 run, user-confirmed); fp32 = mcore distributed Adam with fp32 main params + fp32 moments.
+  # mcore has no bf16 stochastic-rounding optimizer like FSDP's.
+  case "${MCORE_OPTIM:=bf16}" in
     fp32) ;;
     bf16) ARGS+=('++actor_rollout_ref.actor.optim.override_optimizer_config={use_precision_aware_optimizer:true,exp_avg_dtype:bf16,exp_avg_sq_dtype:bf16}') ;;
     *) echo "MCORE_OPTIM must be fp32|bf16"; exit 1 ;;
