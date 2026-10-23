@@ -70,10 +70,30 @@ def init_megatron_optim_config(
     return config
 
 
+def _patch_precision_aware_resume():
+    """mcore 0.16.1: dp-reshardable optimizer checkpoints tag each param's state with `padding: bool`. The
+    precision-aware branch of DistributedOptimizer._set_main_param_and_optimizer_states hands every entry to TE
+    FusedAdam.set_scaled_state, which asserts a tensor, so resuming a use_precision_aware_optimizer run
+    (MCORE_OPTIM=bf16) crashed in load_checkpoint (rlmath mcore bf16 c2, 10-23). The fp32 branch copies only its own
+    keys; drop non-tensor entries before either branch sees them."""
+    from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
+
+    orig = DistributedOptimizer._set_main_param_and_optimizer_states
+    if getattr(orig, "_rlmath_patched", False):
+        return
+
+    def _set_main_param_and_optimizer_states(self, model_param, tensors):
+        return orig(self, model_param, {k: v for k, v in tensors.items() if isinstance(v, torch.Tensor)})
+
+    _set_main_param_and_optimizer_states._rlmath_patched = True
+    DistributedOptimizer._set_main_param_and_optimizer_states = _set_main_param_and_optimizer_states
+
+
 def get_megatron_optimizer(
     model,
     config: OptimizerConfig,
 ):
+    _patch_precision_aware_resume()
     # Base optimizer.
     return get_megatron_optimizer_native(
         config=config,
