@@ -35,6 +35,7 @@ from verl.models.transformers.monkey_patch import apply_monkey_patch
 from verl.trainer.config import CheckpointConfig
 from verl.utils import tensordict_utils as tu
 from verl.utils.activation_offload import enable_activation_offloading
+from verl.utils.rlmath_save_on_cpu import save_on_cpu_ctx
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.dataset.dataset_utils import DatasetPadMode
 from verl.utils.debug import log_gpu_memory_usage
@@ -638,9 +639,15 @@ class FSDPEngine(BaseEngine):
         # and _build_fsdp_module, so self.scaler may not be set.
         scaler = getattr(self, "scaler", None)
 
+        # RLMATH_SAVE_ON_CPU=1 (10-18, selective since 10-19): keep large dense autograd-saved activations (the per-layer checkpoint inputs) in pinned CPU
+        # memory during the training forward; backward (incl. checkpoint recompute) stays outside the context. On GH200
+        # this cut a 131k-token Qwen3.5-9B step from 82.4 to 54.3 GiB peak at the same speed (verl's own
+        # enable_activation_offload made it worse). Numerically identical.
+        save_on_cpu = not forward_only and os.environ.get("RLMATH_SAVE_ON_CPU") == "1"
         for micro_batch in micro_batches:
             with ctx:
-                loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
+                with save_on_cpu_ctx() if save_on_cpu else nullcontext():
+                    loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
 
                 if not forward_only:
                     if scaler is not None:

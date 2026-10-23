@@ -186,6 +186,17 @@ class AsyncRemoteAgentLoop(RemoteAgentLoop):
             raise RuntimeError("rlmath async: standalone proxy mode (PROXY_SERVER_URL) is not supported")
         self._rlmath_versions: dict | None = None
 
+    def _get_proxy_url(self) -> str:
+        url = super()._get_proxy_url()
+        # Multi-node: the agent (in this AgentLoopWorker process) may sit on a different node than the proxy
+        # actor, so the base class's LLM_PROXY_IP=127.0.0.1 would miss it. The proxy URL already carries the
+        # proxy node's Ray IP (ib0 on JUPITER), reachable from every node -> point the agent there.
+        if os.environ.get("RLMATH_PROXY_IP_FROM_URL") == "1":
+            from urllib.parse import urlparse
+
+            os.environ["LLM_PROXY_IP"] = urlparse(url).hostname
+        return url
+
     async def _get_session_data(self, proxy_url: str, trial_id: str):
         session = await super()._get_session_data(proxy_url, trial_id)
         try:

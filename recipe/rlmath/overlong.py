@@ -36,7 +36,12 @@ OVERLONG_MODES = ("filter", "penalize", "off")
 INFRA_ERROR_RE = re.compile(
     r"docker|compose|EnvironmentStart|AddTestsDir|Failed to detect Docker platform|Cannot connect to the Docker"
     r"|Connection (refused|reset)|ConnectionError|No space left on device|OCI runtime|container .* (not found|is not running)"
-    r"|sbx-docker\.sock|BuildError|ImageNotFound",
+    r"|sbx-docker\.sock|BuildError|ImageNotFound"
+    # Apptainer sandboxes (JUPITER): Harbor's Singularity backend failing to start/feed the in-container server
+    r"|Singularity|apptainer|FastAPI server|Failed to upload directory|Failed to start tmux session|ConnectError"
+    r"|RemoteProtocolError|Server disconnected"
+    # filesystem quota on the host (10-12, JUPITER c9: EDQUOT on trial dirs -> setup/verifier failures scored 0 and trained on)
+    r"|Disk quota exceeded|Errno 122|No reward file found",
     re.IGNORECASE,
 )
 

@@ -56,9 +56,13 @@ def save_dist_checkpointing(
 def load_dist_checkpointing(sharded_state_dict, ckpt_dir):
     # Get checkpointing strategies
     load_strategy = get_default_load_sharded_strategy(ckpt_dir)
-    load_strategy = FullyParallelLoadStrategyWrapper(
-        load_strategy, mpu.get_data_parallel_group(with_context_parallel=True)
-    )
+    # RLMATH_MCORE_PLAIN_LOAD=1: every rank reads its own shards from disk instead of splitting the reads across DP
+    # ranks and broadcasting them (exchange_loaded_tensors_broadcast hung 30 min -> NCCL timeout on 8-node c2, 10-20)
+    import os
+    if os.environ.get("RLMATH_MCORE_PLAIN_LOAD", "0") != "1":
+        load_strategy = FullyParallelLoadStrategyWrapper(
+            load_strategy, mpu.get_data_parallel_group(with_context_parallel=True)
+        )
 
     # Fix torch.load weights only error
     try:

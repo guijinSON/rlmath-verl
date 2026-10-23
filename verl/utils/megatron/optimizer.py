@@ -55,6 +55,14 @@ def init_megatron_optim_config(
     if override_config:
         for k, v in override_config.items():
             optim_args[k] = v
+    # mcore's OptimizerConfig wants torch dtypes for the precision-aware optimizer fields; Hydra overrides give strings
+    # ("bf16", "fp32", "torch.bfloat16"), e.g. MCORE_OPTIM=bf16 in recipe/rlmath/run_rlmath_async.sh
+    _dtypes = {"bf16": torch.bfloat16, "bfloat16": torch.bfloat16, "fp16": torch.float16, "float16": torch.float16,
+               "fp32": torch.float32, "float32": torch.float32}
+    for k in ("main_grads_dtype", "main_params_dtype", "exp_avg_dtype", "exp_avg_sq_dtype"):
+        v = optim_args.get(k)
+        if isinstance(v, str):
+            optim_args[k] = _dtypes[v.removeprefix("torch.")]
 
     print_rank_0(f"optimizer config after override: {optim_args}")
 
@@ -62,10 +70,30 @@ def init_megatron_optim_config(
     return config
 
 
+def _patch_precision_aware_resume():
+    """mcore 0.16.1: dp-reshardable optimizer checkpoints tag each param's state with `padding: bool`. The
+    precision-aware branch of DistributedOptimizer._set_main_param_and_optimizer_states hands every entry to TE
+    FusedAdam.set_scaled_state, which asserts a tensor, so resuming a use_precision_aware_optimizer run
+    (MCORE_OPTIM=bf16) crashed in load_checkpoint (rlmath mcore bf16 c2, 10-23). The fp32 branch copies only its own
+    keys; drop non-tensor entries before either branch sees them."""
+    from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
+
+    orig = DistributedOptimizer._set_main_param_and_optimizer_states
+    if getattr(orig, "_rlmath_patched", False):
+        return
+
+    def _set_main_param_and_optimizer_states(self, model_param, tensors):
+        return orig(self, model_param, {k: v for k, v in tensors.items() if isinstance(v, torch.Tensor)})
+
+    _set_main_param_and_optimizer_states._rlmath_patched = True
+    DistributedOptimizer._set_main_param_and_optimizer_states = _set_main_param_and_optimizer_states
+
+
 def get_megatron_optimizer(
     model,
     config: OptimizerConfig,
 ):
+    _patch_precision_aware_resume()
     # Base optimizer.
     return get_megatron_optimizer_native(
         config=config,

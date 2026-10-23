@@ -1,3 +1,4 @@
+import os
 # Copyright 2025 Bytedance Ltd. and/or its affiliates
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -261,6 +262,56 @@ def _build_mtp_loss_mask_nested(response_mask, input_ids_lengths, response_atten
     return torch.nested.nested_tensor(pieces, layout=torch.jagged)
 
 
+
+def _rlmath_chunked_lm_head(model, model_call, logits_processor, args, chunk):
+    """RLMATH_LOGITS_CHUNK>0 on the bshd path (10-20): never materialize [b, S, V/tp] logits. Megatron's Float16Module
+    casts the full logits to fp32 (27.7 GiB at 120k tokens with TP4) and verl then runs log-softmax/entropy over all of
+    it -> OOM on 96 GB GH200. Instead: run the decoder with the LM output stage off (hidden states, sequence-parallel
+    shard [S/tp, b, H]), then per chunk of k local rows: output_layer (all-gathers the TP shards -> rows rank-major)
+    -> verl's own logits_processor on [b, tp*k, V/tp], under non-reentrant checkpointing when grads are on, and
+    scatter the per-token outputs back to sequence order. Same math as the unchunked path."""
+    import torch.utils.checkpoint as _cp
+    from megatron.core import parallel_state as _mpu
+
+    root = unwrap_model(model)
+    lm = getattr(root, "language_model", root)
+    lm.post_process = False
+    try:
+        hidden = model_call()
+    finally:
+        lm.post_process = True
+    hidden = hidden.to(lm.output_layer.weight.dtype)          # Float16Module returns fp32
+    tp = _mpu.get_tensor_model_parallel_world_size() if lm.config.sequence_parallel else 1
+    S_loc, b = hidden.shape[0], hidden.shape[1]
+    S = S_loc * tp
+    label, temperature = args["label"], args["temperature"]
+    assert label.shape[1] == S, f"label len {label.shape} vs hidden {hidden.shape} x tp {tp}"
+    k = max(1, chunk // tp)
+    outs, idxs = {}, []
+
+    def _one(hc, lab, tem):
+        lg, _ = lm.output_layer(hc)                            # [tp*k', b, V/tp]
+        # clone: verl's logits_processor clamps temperature in place, which breaks checkpoint's saved-input check
+        return logits_processor(lg.transpose(0, 1).contiguous(), label=lab, temperature=tem.clone())
+
+    for s in range(0, S_loc, k):
+        e = min(s + k, S_loc)
+        idx = torch.cat([torch.arange(r * S_loc + s, r * S_loc + e, device=label.device) for r in range(tp)])
+        lab, tem = label[:, idx], temperature[:, idx]
+        if torch.is_grad_enabled() and hidden.requires_grad:
+            res = _cp.checkpoint(_one, hidden[s:e], lab, tem, use_reentrant=False)
+        else:
+            res = _one(hidden[s:e], lab, tem)
+        for key, v in res.items():
+            outs.setdefault(key, []).append(v)
+        idxs.append(idx)
+    all_idx = torch.cat(idxs)
+    ret = {}
+    for key, vs in outs.items():
+        cat = torch.cat(vs, dim=1)
+        ret[key] = cat.new_zeros((b, S) + tuple(cat.shape[2:])).index_copy(1, all_idx, cat)
+    return ret
+
 def gptmodel_forward_model_engine(
     model,
     input_ids,
@@ -418,12 +469,17 @@ def gptmodel_forward_model_engine(
         else:
             attention_mask = attention_mask_bshd
 
-        output_orig = model(
-            input_ids=input_ids_bshd,
-            attention_mask=attention_mask,
-            position_ids=None if vision_model else position_ids_bshd,
-            **model_kwargs,
-        )
+        def _model_call():
+            return model(
+                input_ids=input_ids_bshd,
+                attention_mask=attention_mask,
+                position_ids=None if vision_model else position_ids_bshd,
+                **model_kwargs,
+            )
+
+        _rl_chunk = int(os.environ.get("RLMATH_LOGITS_CHUNK", "0"))
+        _rl_chunked = _rl_chunk > 0 and post_process and logits_processor is not None and not mtp_enable_train and not value_model
+        output_orig = None if _rl_chunked else _model_call()
         if post_process and logits_processor is not None:
             args = {
                 k: preprocess_bshd_engine(
@@ -431,7 +487,10 @@ def gptmodel_forward_model_engine(
                 )[0]
                 for k, v in logits_processor_args.items()
             }
-            output_dict = logits_processor(output_orig, **args)
+            if _rl_chunked:
+                output_dict = _rlmath_chunked_lm_head(model, _model_call, logits_processor, args, _rl_chunk)
+            else:
+                output_dict = logits_processor(output_orig, **args)
             output = {
                 k: postprocess_bshd_engine(v, attention_mask_bshd, post_process=post_process)
                 for k, v in output_dict.items()
