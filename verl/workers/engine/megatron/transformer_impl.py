@@ -73,6 +73,34 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+
+def _rlmath_chunked_logprobs(logits, label, calculate_entropy, chunk):
+    """RLMATH_LOGITS_CHUNK>0 (10-20): log-probs/entropy over sequence chunks instead of the whole [b, s, V/tp] logits at
+    once. The unchunked path clones the logits for entropy and runs an fp32 vocab-parallel log-softmax over the full
+    sequence (~20 GiB extra at ~100k tokens) -> OOM in compute_log_prob on 96 GB GH200 (64x16-mcore c1/c2, 10-19).
+    Each chunk works on a clone (mcore's vocab-parallel CE/entropy modify their input in place), under non-reentrant
+    activation checkpointing when grads are needed. Numerically identical per token."""
+    import torch.utils.checkpoint as _cp
+
+    def _one(lg, lb):
+        lp = vocab_parallel_log_probs_from_logits(lg.clone(), lb)
+        en = vocab_parallel_entropy(lg.clone()) if calculate_entropy else torch.zeros_like(lp)
+        return lp, en
+
+    lps, ens = [], []
+    for s in range(0, logits.shape[1], chunk):
+        lg, lb = logits[:, s : s + chunk], label[:, s : s + chunk]
+        if torch.is_grad_enabled() and logits.requires_grad:
+            lp, en = _cp.checkpoint(_one, lg, lb, use_reentrant=False)
+        else:
+            lp, en = _one(lg, lb)
+        lps.append(lp)
+        ens.append(en)
+    ret = {"log_probs": torch.cat(lps, dim=1)}
+    if calculate_entropy:
+        ret["entropy"] = torch.cat(ens, dim=1)
+    return ret
+
 class MegatronEngine(BaseEngine):
     def __init__(
         self,
@@ -921,6 +949,9 @@ class MegatronEngineWithLMHead(MegatronEngine):
                 temperature[temperature <= 0] = 1e-8
                 assert torch.all(temperature > 0).item(), f"temperature tensor must be positive. Got {temperature}"
                 logits.div_(temperature.unsqueeze(dim=-1).to(logits.dtype))
+                _rl_chunk = int(os.environ.get("RLMATH_LOGITS_CHUNK", "0"))
+                if _rl_chunk > 0 and logits.dim() == 3 and not calculate_sum_pi_squared and not distillation_use_topk:
+                    return _rlmath_chunked_logprobs(logits, label, calculate_entropy, _rl_chunk)
                 ret = {}
                 # sum_pi_squared is non-destructive — must run before vocab_parallel_entropy.
                 if calculate_sum_pi_squared:
