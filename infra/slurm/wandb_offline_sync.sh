@@ -40,7 +40,7 @@ while true; do
       [ -f $pidf ] && { kill $(cat $pidf) 2>/dev/null; sleep 5; rm -f $pidf; }
       echo "[$(date)] final sync $id" >> $ST/logs/supervisor.log
       timeout 1800 $V/wandb beta sync --yes --no-skip-synced "$D" >> $ST/logs/$id.log 2>&1
-      [ -n "$JL" ] && (cd /tmp && timeout 600 $V/python $HERE/wandb_backfill_from_log.py $id $JL >> $ST/logs/$id.log 2>&1)
+      [ -n "$JL" ] && (cd /tmp && timeout 600 $V/python $HERE/wandb_backfill_from_log.py $id $JL --final >> $ST/logs/$id.log 2>&1)
       touch $ST/done/$id; echo "[$(date)] done $id (backfill log: ${JL:-none})" >> $ST/logs/supervisor.log
     fi
   done
