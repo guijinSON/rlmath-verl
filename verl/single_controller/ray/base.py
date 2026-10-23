@@ -30,6 +30,7 @@ from verl.protocol import DataProto, _padding_size_key
 from verl.single_controller.base import ClassWithInitArgs, ResourcePool, Worker, WorkerGroup
 from verl.single_controller.base.decorator import MAGIC_ATTR, Dispatch
 from verl.utils.device import get_device_name
+from verl.utils.net_utils import bind_listen_port
 from verl.utils.py_functional import temp_env_var
 
 __all__ = ["Worker"]
@@ -93,8 +94,7 @@ def get_master_addr_port(master_port_range: Optional[list[int]] = None) -> tuple
 
     if master_port_range is None:
         with socket.socket() as s:
-            s.bind(("", 0))
-            port = s.getsockname()[1]
+            port = bind_listen_port(s)
     else:
         port = master_port_range[0]
         while port < master_port_range[1]:
