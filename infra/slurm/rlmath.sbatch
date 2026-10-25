@@ -36,3 +36,10 @@ sleep 30
 srun --overlap -N1 -n1 -w $HEAD bash -c "source $VENV/bin/activate && ray status --address=$HEAD_IP:6391 | head -25"
 srun --overlap -N1 -n1 -w $HEAD bash -c "RAY_EXTERNAL=1 RAY_ADDRESS=$HEAD_IP:6391 bash recipe/rlmath/run_rlmath_async.sh $*"
 rc=$?; echo "[$(date)] driver exited rc=$rc"
+# A driver that dies within 30 min of the job starting is broken, not unlucky: hold the rest of the chain instead of
+# letting its afterany dependents start and fail one after another (10-25: all 12 jobs of a chain, 2 min each).
+if [ $rc -ne 0 ] && [ $SECONDS -lt 1800 ]; then
+  base=${SLURM_JOB_NAME%-c[0-9]*}
+  ids=$(squeue --me -h -t PD -o "%i %j" | awk -v b="$base" '$2 == b || index($2, b "-c") == 1 {print $1}' | tr '\n' ' ')
+  [ -n "${ids// }" ] && scontrol hold $ids && echo "[$(date)] driver failed after ${SECONDS}s: held the rest of chain $base: $ids"
+fi

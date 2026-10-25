@@ -262,10 +262,14 @@ fi
 # Apptainer runs every task from the image its task.toml names ([environment] docker_image = .sif or Docker ref); Harbor
 # snapshot tasks ship only environment/Dockerfile. 10-25: a 12-node job ran 76 steps with every trial failing on that
 # (infra_failed_frac 1.0, all dropped, nothing trained). Check a sample of each task dir before starting anything.
-if [ "$SANDBOX" = apptainer ]; then
+# Globs, not `ls | head`: under pipefail the SIGPIPE from head on an 18k-entry dir killed every job of a chain (rc 141).
+# Driver only: the ENV_ONLY sourcing on every node must stay fast (~50 s for 18k dirs on Lustre would delay ray start).
+if [ "$SANDBOX" = apptainer ] && [ "${ENV_ONLY:-0}" != 1 ]; then
   for D in "${TRAIN_DIR:-$W/data/tasks_train}" "$VAL_DIR"; do
-    bad=$(ls "$D" 2>/dev/null | head -200 | while read -r t; do grep -qs '^docker_image' "$D/$t/task.toml" || echo "$t"; done | head -3)
-    [ -n "$(ls "$D" 2>/dev/null | head -1)" ] && [ -z "$bad" ] || { echo "ABORT: SANDBOX=apptainer but $D is empty or has tasks without docker_image in task.toml (e.g. $bad)"; exit 1; }
+    TOMLS=("$D"/*/task.toml); BAD=()
+    [ -e "${TOMLS[0]}" ] || { echo "ABORT: SANDBOX=apptainer but $D has no tasks"; exit 1; }
+    for f in "${TOMLS[@]:0:200}"; do grep -qs '^docker_image' "$f" || BAD+=("$(basename "$(dirname "$f")")"); done
+    [ ${#BAD[@]} -eq 0 ] || { echo "ABORT: SANDBOX=apptainer but tasks in $D have no docker_image in task.toml (e.g. ${BAD[*]:0:3})"; exit 1; }
   done
 fi
 
