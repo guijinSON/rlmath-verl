@@ -259,6 +259,16 @@ if [ "${DRY:-0}" = 1 ]; then
   exit 0
 fi
 
+# Apptainer runs every task from the image its task.toml names ([environment] docker_image = .sif or Docker ref); Harbor
+# snapshot tasks ship only environment/Dockerfile. 10-25: a 12-node job ran 76 steps with every trial failing on that
+# (infra_failed_frac 1.0, all dropped, nothing trained). Check a sample of each task dir before starting anything.
+if [ "$SANDBOX" = apptainer ]; then
+  for D in "${TRAIN_DIR:-$W/data/tasks_train}" "$VAL_DIR"; do
+    bad=$(ls "$D" 2>/dev/null | head -200 | while read -r t; do grep -qs '^docker_image' "$D/$t/task.toml" || echo "$t"; done | head -3)
+    [ -n "$(ls "$D" 2>/dev/null | head -1)" ] && [ -z "$bad" ] || { echo "ABORT: SANDBOX=apptainer but $D is empty or has tasks without docker_image in task.toml (e.g. $bad)"; exit 1; }
+  done
+fi
+
 source $VENV/bin/activate
 export PATH=$W/bin:$PATH
 export CUDA_VISIBLE_DEVICES=$GPU_LIST
