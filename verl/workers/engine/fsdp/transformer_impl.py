@@ -35,6 +35,7 @@ from verl.models.transformers.monkey_patch import apply_monkey_patch
 from verl.trainer.config import CheckpointConfig
 from verl.utils import tensordict_utils as tu
 from verl.utils.activation_offload import enable_activation_offloading
+from verl.utils.rlmath_save_on_cpu import save_on_cpu_ctx, wants_save_on_cpu
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.dataset.dataset_utils import DatasetPadMode
 from verl.utils.debug import log_gpu_memory_usage
@@ -638,9 +639,19 @@ class FSDPEngine(BaseEngine):
         # and _build_fsdp_module, so self.scaler may not be set.
         scaler = getattr(self, "scaler", None)
 
+        # RLMATH_SAVE_ON_CPU=1 (10-18, selective since 10-19): keep large dense autograd-saved activations (the per-layer checkpoint inputs) in pinned CPU
+        # memory during the training forward; backward (incl. checkpoint recompute) stays outside the context. On GH200
+        # this cut a 131k-token Qwen3.5-9B step from 82.4 to 54.3 GiB peak at the same speed (verl's own
+        # enable_activation_offload made it worse). Numerically identical. RLMATH_SAVE_ON_CPU_MIN_TOKENS limits it to long
+        # micro-batches (10-30: pageable offload of every micro-batch made update_actor ~5x slower).
+        save_on_cpu = not forward_only and os.environ.get("RLMATH_SAVE_ON_CPU") == "1"
+        n_offloaded = 0
         for micro_batch in micro_batches:
+            offload = save_on_cpu and wants_save_on_cpu(micro_batch)
+            n_offloaded += offload
             with ctx:
-                loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
+                with save_on_cpu_ctx() if offload else nullcontext():
+                    loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
 
                 if not forward_only:
                     if scaler is not None:
@@ -649,6 +660,9 @@ class FSDPEngine(BaseEngine):
                         loss.backward()
 
             output_lst.append(meta_info)
+
+        if save_on_cpu and torch.distributed.get_rank() == 0:
+            logger.warning(f"[rlmath] save_on_cpu: {n_offloaded}/{len(micro_batches)} micro-batches offloaded on rank 0")
 
         # postprocess and return
         return postprocess_batch_func(output_lst=output_lst, indices=indices, data=data)

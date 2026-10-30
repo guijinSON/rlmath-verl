@@ -141,3 +141,25 @@ common/rlmath_watchdog.sh    every 5 min: driver alive? log stalled > 90 min? â†
 * A dropped SSH/exec session is not proof that the command did not run. Check state before re-running anything.
 * Secrets (SSH keys, HF/W&B tokens) live in 0600 files and are read into env vars. They never go in argv, logs or
   this repository; only `*.example` templates are committed.
+
+## Recipes, site profiles and entry points (10-23)
+
+Runs are now **recipe + site + data**, so the same experiment is launched the same way everywhere:
+
+* `recipe/rlmath/recipes/*.env`: the fixed algorithm, with a few named options: lr, staleness, FSDP/Megatron backend, optimizer
+  precision. See `recipe/rlmath/recipes/README.md`.
+* `infra/sites/<site>.env`: one machine's hardware and plumbing: GPU layout, `ROLLOUT_MEM`, sandbox backend (Docker VMs or
+  Apptainer), concurrency, paths, keys, and optional `site_prelaunch` / `site_preflight` hooks. Real profiles contain cluster
+  paths, accounts and hosts and are kept out of this public repo (`infra/sites/*.env` is gitignored). Templates:
+  `slurm-gh200.env.example`, `k8s-pod.env.example`, `ssh-box.env.example`.
+* `infra/run_single_node.sh` (pod / SSH box) and `infra/slurm/rlmath.sbatch` (multi-node Slurm: Ray over all nodes on
+  InfiniBand, Apptainer sandboxes on the nodes) source site, then recipe, then start `recipe/rlmath/run_rlmath_async.sh`.
+* Slurm helpers for offline compute nodes, run on a login node:
+  * `infra/slurm/export_ckpts.sh`: rolling FSDP checkpoint export to HF; deletes local copies once verified, keeps the newest.
+  * `infra/slurm/wandb_offline_sync.sh`: W&B live mirror plus a backfill of steps lost at a time-limit kill.
+
+Shared-filesystem lessons from the Slurm site:
+* Write nothing to a filesystem over its soft inode quota. Above the soft limit, new files fail with EDQUOT even though
+  `df` still shows free inodes, because `df` counts to the hard limit.
+* Keep trial dirs, Hydra outputs and the HF datasets cache node-local.
+* Checkpoint to a filesystem with headroom. The site's `site_preflight` aborts a job at start rather than at its first save.

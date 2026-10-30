@@ -131,3 +131,5 @@ logs
 log
 outputs
 .history
+# real site profiles (paths, accounts, hosts) live only in the private repo
+infra/sites/*.env

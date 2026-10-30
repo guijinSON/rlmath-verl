@@ -57,9 +57,10 @@ class WorkerHelper:
 
     @staticmethod
     def _get_free_port():
+        from verl.utils.net_utils import bind_listen_port
+
         with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
+            return bind_listen_port(sock)
 
     def get_availale_master_addr_port(self):
         warnings.warn(

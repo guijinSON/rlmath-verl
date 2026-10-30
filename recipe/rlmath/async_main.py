@@ -61,7 +61,8 @@ def _preflight(config) -> None:
     if ngpu_roll % tp:
         errors.append(f"rollout GPUs ({ngpu_roll}) not divisible by rollout TP ({tp})")
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if visible and ngpu_train + ngpu_roll > len(visible.split(",")):
+    # RAY_EXTERNAL=1 (multi-node sbatch): GPUs come from every node of the joined cluster, not this one's mask
+    if visible and os.environ.get("RAY_EXTERNAL") != "1" and ngpu_train + ngpu_roll > len(visible.split(",")):
         errors.append(f"trainer({ngpu_train}) + rollout({ngpu_roll}) GPUs > CUDA_VISIBLE_DEVICES={visible}")
     from recipe.rlmath.overlong import resolve_overlong_mode
 
