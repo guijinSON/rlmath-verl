@@ -11,6 +11,9 @@ import os
 
 MIN_BYTES = 16 << 20
 PIN = os.environ.get("RLMATH_SAVE_ON_CPU_PIN") == "1"
+# only offload micro-batches of at least this many tokens (10-30): peak memory is set by the longest trajectory, so short
+# ones run at full speed on the GPU; 0 = offload every micro-batch
+MIN_TOKENS = int(os.environ.get("RLMATH_SAVE_ON_CPU_MIN_TOKENS", "0"))
 
 
 def _pack(t):
@@ -35,3 +38,17 @@ def _unpack(p):
 
 def save_on_cpu_ctx():
     return torch.autograd.graph.saved_tensors_hooks(_pack, _unpack)
+
+
+def micro_batch_tokens(micro_batch):
+    ids = micro_batch["input_ids"]
+    return ids.values().numel() if ids.is_nested else ids.numel()   # padded layout counts padding: offloads more, never less
+
+
+def wants_save_on_cpu(micro_batch):
+    if MIN_TOKENS <= 0:
+        return True
+    try:
+        return micro_batch_tokens(micro_batch) >= MIN_TOKENS
+    except Exception:
+        return True
